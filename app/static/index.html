@@ -1,0 +1,1037 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>EC2 Inspector</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2l12 7v14l-12 7-12-7V9z' fill='%23172236' stroke='%236ea1ff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%234fd1c5'/%3E%3C/svg%3E">
+<script>
+  /* Pick the theme before the page paints, so there is no flash. */
+  (function () {
+    try {
+      var theme = localStorage.getItem("ec2inspector.theme");
+      if (theme !== "light" && theme !== "dark") {
+        theme = window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      }
+      document.documentElement.setAttribute("data-theme", theme);
+    } catch (e) { /* keep the default */ }
+  })();
+</script>
+<style>
+  :root, :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0e1522; --bg2: #14203a; --panel: #172236; --panel-2: #1c2b45; --line: #2a3a56; --line-strong: #44608f;
+    --text: #e8eef9; --muted: #97a7c2; --accent: #6ea1ff; --accent-2: #4fd1c5; --on-accent: #08111f;
+    --ok: #4cd6a0; --warn: #f4bd5a; --crit: #f58383; --stop: #93a0b8; --pend: #a89cf7; --term: #667391;
+    --shadow: 0 10px 30px rgba(0, 0, 0, .35); --row-hover: rgba(110, 161, 255, .09); --scrim: rgba(5, 9, 18, .6);
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #f2f5fa; --bg2: #e6edf8; --panel: #ffffff; --panel-2: #f5f8fd; --line: #e0e7f2; --line-strong: #b9c9e3;
+    --text: #1c2740; --muted: #62718d; --accent: #3a6fe4; --accent-2: #14a39a; --on-accent: #ffffff;
+    --ok: #16875a; --warn: #a8680a; --crit: #c9404c; --stop: #66748c; --pend: #6b5bd6; --term: #8a96ab;
+    --shadow: 0 8px 26px rgba(30, 50, 90, .12); --row-hover: rgba(58, 111, 228, .07); --scrim: rgba(28, 39, 64, .35);
+  }
+  :root {
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, Roboto, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+  body {
+    margin: 0; min-height: 100vh; color: var(--text); font: 14px/1.5 var(--sans);
+    background: linear-gradient(180deg, var(--bg2), var(--bg) 360px) no-repeat, var(--bg);
+    transition: background-color .25s, color .25s;
+  }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 10px; border: 2px solid transparent; background-clip: content-box; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ------------------------------ header ------------------------------ */
+  header {
+    position: sticky; top: 0; z-index: 20; display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center;
+    padding: 12px 24px; border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--bg) 84%, transparent); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  }
+  .brand { display: flex; align-items: center; gap: 12px; margin-right: 8px; }
+  .brand h1 { margin: 0; font-size: 17px; letter-spacing: .1em; font-weight: 700; text-transform: uppercase; }
+  .brand small { display: block; color: var(--muted); letter-spacing: .12em; font-size: 10.5px; text-transform: uppercase; margin-top: -2px; }
+  .live { display: inline-flex; align-items: center; gap: 7px; font: 600 11px var(--mono); letter-spacing: .12em; color: var(--ok); }
+  .live i { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; transform: scale(.8); } }
+  #demochip { display: none; padding: 3px 11px; border-radius: 999px; font: 700 11px var(--mono); letter-spacing: .1em; color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); }
+  #demochip.show { display: inline-block; }
+  .spacer { flex: 1; }
+  #countdown { color: var(--muted); font: 12px var(--mono); min-width: 74px; }
+
+  select, input[type=search], input[type=password], button {
+    font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 7px 12px; transition: border-color .15s, background .15s, box-shadow .15s, transform .1s;
+  }
+  select {
+    -webkit-appearance: none; appearance: none; padding-right: 30px; cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%2397a7c2' stroke-width='2'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 11px center;
+  }
+  select:disabled { opacity: .45; cursor: not-allowed; }
+  button { cursor: pointer; }
+  button:hover:not(:disabled), select:hover:not(:disabled), input:hover { border-color: var(--line-strong); }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+  button.primary:hover { filter: brightness(1.08); border-color: var(--accent); }
+  button.icon { padding: 7px 11px; min-width: 38px; }
+  label.inline { display: inline-flex; gap: 8px; align-items: center; color: var(--muted); }
+  input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
+  kbd { font: 600 11.5px var(--mono); padding: 2px 7px; border-radius: 6px; border: 1px solid var(--line-strong); border-bottom-width: 2px; background: var(--panel-2); color: var(--text); }
+
+  main { padding: 22px 24px 48px; max-width: 1480px; margin: 0 auto; }
+  #banner { display: none; margin-bottom: 14px; padding: 11px 16px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--crit) 50%, transparent); background: color-mix(in srgb, var(--crit) 12%, transparent); color: var(--crit); }
+  #banner.note { border-color: color-mix(in srgb, var(--warn) 50%, transparent); background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); }
+  #keybox { display: none; gap: 10px; margin-bottom: 14px; align-items: center; }
+
+  /* ------------------------------ overview ---------------------------- */
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); }
+  .overview { display: grid; grid-template-columns: 250px 1fr; gap: 16px; margin-bottom: 18px; }
+  .ringpanel { padding: 14px 10px; display: grid; place-items: center; }
+  #ring { width: 200px; height: 200px; overflow: visible; }
+  #ring .track { fill: none; stroke: var(--line); stroke-width: 16; opacity: .7; }
+  #ring .seg { fill: none; stroke-width: 16; cursor: pointer; outline: none; transition: stroke-width .15s, opacity .15s; }
+  #ring:hover .seg:not(:hover) { opacity: .45; }
+  #ring .seg:hover, #ring .seg:focus-visible, #ring .seg.on { stroke-width: 21; }
+  #ring.picked .seg:not(.on) { opacity: .35; }
+  .ring-n { font: 700 44px var(--sans); fill: var(--text); font-variant-numeric: tabular-nums; }
+  .ring-l { font: 700 10px var(--sans); letter-spacing: .22em; fill: var(--muted); }
+  .ring-p { font: 700 11.5px var(--mono); fill: var(--ok); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .card {
+    --c: var(--accent); position: relative; text-align: left; padding: 16px 20px; border-radius: 16px; overflow: hidden;
+    display: flex; flex-direction: column; justify-content: center; gap: 4px; min-height: 120px;
+    border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); transition: transform .15s, border-color .15s, box-shadow .15s;
+  }
+  .card::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 4px; background: var(--c); }
+  .card::after { content: ""; position: absolute; right: -34px; bottom: -40px; width: 120px; height: 120px; border-radius: 50%; background: var(--c); opacity: .09; }
+  .card[data-v="CRITICAL"] { --c: var(--crit); } .card[data-v="WARNING"] { --c: var(--warn); }
+  .card[data-v="HEALTHY"] { --c: var(--ok); } .card[data-v="STOPPED"] { --c: var(--stop); }
+  .card:hover { transform: translateY(-3px); border-color: var(--c); }
+  .card.active { border-color: var(--c); box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 55%, transparent), var(--shadow); }
+  .card .n { display: block; font: 700 42px/1.05 var(--sans); color: var(--c); font-variant-numeric: tabular-nums; }
+  .card .l { color: var(--muted); letter-spacing: .1em; text-transform: uppercase; font-size: 11.5px; font-weight: 600; }
+
+  /* ------------------------------ filters ----------------------------- */
+  .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  .toolbar input[type=search] {
+    min-width: 300px; flex: 1 1 300px; max-width: 520px; padding-left: 38px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2397a7c2' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20 20l-3.5-3.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: 12px center;
+  }
+  .toolbar .hint { color: var(--muted); font-size: 12px; }
+  .meta { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin-bottom: 12px; padding: 12px 16px; }
+  .filters label { display: inline-flex; gap: 8px; align-items: center; color: var(--muted); font-size: 11.5px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+  .filters select { max-width: 200px; letter-spacing: normal; text-transform: none; font-weight: 400; font-size: 14px; color: var(--text); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+  .fchip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 12px; border-radius: 999px; font-size: 12.5px; color: var(--text); background: color-mix(in srgb, var(--accent) 14%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+  .fchip b { font-weight: 600; }
+  .fchip button { border: 0; background: transparent; padding: 0 8px; font-size: 17px; line-height: 1.2; color: var(--muted); border-radius: 999px; }
+  .fchip button:hover { color: var(--crit); background: color-mix(in srgb, var(--crit) 14%, transparent); }
+
+  /* ------------------------------ table ------------------------------- */
+  .tablewrap { overflow-x: auto; border-radius: 16px; }
+  table { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 1060px; }
+  th, td { padding: 10px 14px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--line); }
+  th { position: sticky; top: 0; background: var(--panel-2); padding: 0; border-bottom: 1px solid var(--line-strong); }
+  th:first-child { border-left: 4px solid transparent; }
+  .th-btn { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 11px 14px; border: 0; border-radius: 0; background: transparent; color: var(--muted); font-size: 11.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; text-align: left; }
+  .th-btn:hover { color: var(--text); background: var(--row-hover); }
+  th[aria-sort="ascending"] .th-btn, th[aria-sort="descending"] .th-btn { color: var(--accent); }
+  .th-btn .arrow { font-size: 9px; min-width: 9px; }
+  tbody tr { --accent-row: var(--stop); cursor: pointer; transition: background .12s; }
+  tbody tr td:first-child { border-left: 4px solid var(--accent-row); font-weight: 600; }
+  tbody tr.v-CRITICAL { --accent-row: var(--crit); } tbody tr.v-WARNING { --accent-row: var(--warn); }
+  tbody tr.v-HEALTHY { --accent-row: var(--ok); } tbody tr.v-PENDING { --accent-row: var(--pend); }
+  tbody tr.v-STOPPED { --accent-row: var(--stop); } tbody tr.v-TERMINATED { --accent-row: var(--term); }
+  tbody tr:hover, tbody tr:focus { background: var(--row-hover); outline: none; }
+  tbody tr.selected { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr.enter { animation: rowin .4s cubic-bezier(.2, .7, .2, 1) both; animation-delay: calc(var(--i, 0) * 25ms); }
+  @keyframes rowin { from { opacity: 0; transform: translateY(8px); } }
+  tbody tr.skeleton td { height: 42px; }
+  tbody tr.skeleton td::after { content: ""; display: block; height: 12px; width: 70%; border-radius: 6px; background: linear-gradient(90deg, var(--line), var(--line-strong), var(--line)); background-size: 200% 100%; opacity: .55; animation: shimmer 1.3s linear infinite; }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+  .mono { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+  .idcell { display: flex; align-items: center; gap: 6px; }
+  button.copy { padding: 3px 5px; border-radius: 7px; border-color: transparent; background: transparent; color: var(--muted); line-height: 0; opacity: 0; }
+  tbody tr:hover button.copy, tbody tr:focus-within button.copy, button.copy:focus-visible { opacity: 1; }
+  button.copy:hover { color: var(--accent); border-color: var(--line-strong); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; background: var(--stop); vertical-align: 1px; }
+  .dot.running, .dot.online { background: var(--ok); } .dot.pending { background: var(--pend); }
+  .dot.notonline { background: var(--warn); } .dot.notregistered { background: var(--crit); }
+  .badge { --c: var(--stop); display: inline-flex; align-items: center; gap: 7px; padding: 2px 11px 2px 9px; border-radius: 999px; font: 700 11px var(--mono); letter-spacing: .08em; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); border: 1px solid color-mix(in srgb, var(--c) 38%, transparent); }
+  .badge::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+  .b-HEALTHY { --c: var(--ok); } .b-WARNING { --c: var(--warn); } .b-CRITICAL { --c: var(--crit); }
+  .b-STOPPED { --c: var(--stop); } .b-PENDING { --c: var(--pend); } .b-TERMINATED, .b-UNKNOWN { --c: var(--term); }
+  .issues { display: inline-block; min-width: 24px; text-align: center; padding: 1px 8px; border-radius: 8px; font: 700 12px var(--mono); background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+  .empty { padding: 44px; text-align: center; color: var(--muted); }
+  footer { margin-top: 26px; text-align: center; color: var(--muted); font-size: 12px; }
+
+  /* ---------------------------- detail drawer ------------------------- */
+  #scrim { display: none; position: fixed; inset: 0; z-index: 30; background: var(--scrim); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+  #drawer { display: none; position: fixed; z-index: 40; top: 0; right: 0; bottom: 0; width: min(640px, 100%); overflow-y: auto; padding: 20px 22px 30px; background: var(--bg); border-left: 1px solid var(--line-strong); box-shadow: -16px 0 50px rgba(0, 0, 0, .3); }
+  #drawer.open { display: block; animation: slidein .28s cubic-bezier(.2, .8, .2, 1); }
+  #scrim.open { display: block; animation: fadein .22s ease-out; }
+  @keyframes slidein { from { transform: translateX(40px); opacity: 0; } }
+  @keyframes fadein { from { opacity: 0; } }
+  .dtools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .dtools .meta { margin: 0 4px; }
+  .dhead { margin-bottom: 16px; }
+  .dhead h2 { margin: 0 0 6px; font-size: 22px; }
+  .dhead .idrow { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  .section { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; margin-bottom: 14px; }
+  .section h3 { margin: 0; font-size: 11.5px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; }
+  .section h3::after { content: "\25BE"; color: var(--muted); font-size: 12px; transition: transform .2s; }
+  .section.collapsed h3::after { transform: rotate(-90deg); }
+  .section > h3 + * { margin-top: 11px; }
+  .section.collapsed > :not(h3) { display: none; }
+  dl { display: grid; grid-template-columns: 170px 1fr; gap: 6px 14px; margin: 0; }
+  dt { color: var(--muted); } dd { margin: 0; word-break: break-word; }
+  ul.reasons { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  ul.reasons li { padding: 9px 12px; border-radius: 10px; border-left: 4px solid var(--c); background: color-mix(in srgb, var(--c) 12%, transparent); }
+  li.s-CRITICAL { --c: var(--crit); } li.s-WARNING { --c: var(--warn); } li.s-INFO { --c: var(--accent); }
+  .perf { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+  .gauge-n { font: 700 22px var(--sans); fill: var(--text); } .gauge-l { font: 700 8px var(--sans); letter-spacing: .18em; fill: var(--muted); }
+  .bars { display: flex; align-items: flex-end; gap: 3px; height: 70px; margin-top: 12px; padding-top: 4px; border-bottom: 1px solid var(--line); }
+  .bars div { flex: 1; min-width: 4px; border-radius: 3px 3px 0 0; background: linear-gradient(to top, var(--accent), var(--accent-2)); transform-origin: bottom; animation: grow .55s cubic-bezier(.2, .8, .2, 1) both; transition: filter .15s; }
+  .bars div:hover { filter: brightness(1.3); }
+  @keyframes grow { from { transform: scaleY(0); } }
+  .chip { display: inline-block; margin: 2px 6px 2px 0; padding: 2px 10px; border-radius: 8px; border: 1px solid var(--line-strong); background: color-mix(in srgb, var(--accent) 10%, transparent); font: 12.5px var(--mono); }
+  .vol { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed var(--line); } .vol:last-child { border: 0; margin: 0; padding: 0; }
+
+  /* --------------------------- help + toasts -------------------------- */
+  #helpdlg { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: var(--scrim); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+  .dlg { width: min(460px, 92vw); padding: 22px 24px; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 18px; box-shadow: var(--shadow); animation: fadein .2s ease-out; }
+  .dlg h2 { margin: 0 0 14px; font-size: 18px; }
+  .dlg table { width: 100%; min-width: 0; margin-bottom: 14px; }
+  .dlg td { padding: 6px 4px; border-bottom: 1px solid var(--line); }
+  .dlg tr:last-child td { border-bottom: 0; }
+  #toasts { position: fixed; z-index: 80; left: 50%; bottom: 24px; transform: translateX(-50%); display: grid; gap: 8px; justify-items: center; pointer-events: none; }
+  .toast { padding: 9px 18px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line-strong); box-shadow: var(--shadow); font-size: 13px; animation: toastin .25s ease-out; transition: opacity .35s, transform .35s; }
+  .toast.err { border-color: var(--crit); color: var(--crit); }
+  .toast.out { opacity: 0; transform: translateY(8px); }
+  @keyframes toastin { from { opacity: 0; transform: translateY(10px); } }
+
+  @media (max-width: 900px) { .overview { grid-template-columns: 1fr; } main { padding: 16px 14px 40px; } header { padding: 10px 14px; } dl { grid-template-columns: 1fr; gap: 0; } dt { margin-top: 8px; } .card { min-height: 96px; } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <svg width="36" height="36" viewBox="0 0 38 38" aria-hidden="true">
+      <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6ea1ff"/><stop offset="1" stop-color="#4fd1c5"/></linearGradient></defs>
+      <path d="M19 2.5l14 8.1v16.8L19 35.5 5 27.4V10.6z" fill="none" stroke="url(#lg)" stroke-width="2.4"/>
+      <path d="M19 9.5l8 4.6v9.2l-8 4.6-8-4.6v-9.2z" fill="none" stroke="url(#lg)" stroke-width="1.2" opacity=".55"/>
+      <circle cx="19" cy="19" r="3.6" fill="url(#lg)"/>
+    </svg>
+    <div><h1>EC2 Inspector</h1><small>Fleet health console</small></div>
+  </div>
+  <span class="live"><i></i>LIVE</span>
+  <span id="demochip" title="Synthetic data. No AWS account is being used.">DEMO DATA</span>
+  <span class="spacer"></span>
+  <label class="inline">Region <select id="region" aria-label="Region"></select></label>
+  <button id="refresh" class="primary" title="Refresh (R)">Refresh</button>
+  <label class="inline"><input type="checkbox" id="auto"> Auto-refresh (60s)</label>
+  <span id="countdown" aria-live="off"></span>
+  <button id="download">Download JSON</button>
+  <button id="theme" class="icon" title="Switch light / dark (T)" aria-label="Switch light or dark theme">Theme</button>
+  <button id="help" class="icon" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
+</header>
+
+<main>
+  <div id="banner" role="alert"></div>
+  <div id="keybox">
+    <label for="apikey">API key required:</label>
+    <input type="password" id="apikey" autocomplete="off">
+    <button id="savekey" class="primary">Use key</button>
+  </div>
+
+  <div class="overview" id="overview" hidden>
+    <div class="panel ringpanel"><svg id="ring" viewBox="0 0 200 200" role="group" aria-label="Fleet health ring. Select a slice to filter."></svg></div>
+    <div class="cards" id="cards"></div>
+  </div>
+
+  <div class="toolbar">
+    <input type="search" id="search" placeholder="Search name, id, IP, type, tag value...  ( / )" aria-label="Filter instances">
+    <span class="meta" id="meta" aria-live="polite"></span>
+  </div>
+
+  <div class="panel filters" role="group" aria-label="Filters">
+    <label>State
+      <select id="f-state">
+        <option value="">Any</option><option>running</option><option>stopped</option>
+        <option>pending</option><option>stopping</option><option>shutting-down</option><option>terminated</option>
+      </select>
+    </label>
+    <label>Platform
+      <select id="f-platform"><option value="">Any</option><option>Linux</option><option>Windows</option></select>
+    </label>
+    <label>SSM
+      <select id="f-ssm">
+        <option value="">Any</option><option value="online">Online</option>
+        <option value="notonline">Registered, not online</option><option value="notregistered">Not registered</option>
+      </select>
+    </label>
+    <label>Tag <select id="f-tagkey" aria-label="Tag key"></select>
+      <select id="f-tagval" aria-label="Tag value"></select>
+    </label>
+    <button id="clear" type="button" title="Clear filters (C)">Clear filters</button>
+  </div>
+
+  <div class="chips" id="chips" hidden aria-label="Active filters"></div>
+
+  <div class="panel tablewrap">
+    <table>
+      <thead><tr id="head"></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty" style="display:none">No instances match these filters.</div>
+  </div>
+  <footer>Read-only: nothing is started, stopped or changed. Click a column heading to sort. Press <kbd>?</kbd> for shortcuts.</footer>
+</main>
+
+<div id="scrim"></div>
+<aside id="drawer" aria-label="Instance details" aria-hidden="true"></aside>
+
+<div id="helpdlg" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" hidden>
+  <div class="dlg">
+    <h2>Keyboard shortcuts</h2>
+    <table>
+      <tr><td><kbd>/</kbd></td><td>Search</td></tr>
+      <tr><td><kbd>J</kbd> <kbd>K</kbd></td><td>Move down / up the table, then <kbd>Enter</kbd> to open</td></tr>
+      <tr><td><kbd>&larr;</kbd> <kbd>&rarr;</kbd></td><td>Previous / next server in the open detail panel</td></tr>
+      <tr><td><kbd>R</kbd></td><td>Refresh</td></tr>
+      <tr><td><kbd>C</kbd></td><td>Clear all filters</td></tr>
+      <tr><td><kbd>T</kbd></td><td>Switch light / dark</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td>Close panel or this window</td></tr>
+      <tr><td><kbd>?</kbd></td><td>Show or hide this help</td></tr>
+    </table>
+    <button id="helpclose" class="primary">Close</button>
+  </div>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const NOT_SET = "__NOT_SET__";
+const THEME_KEY = "ec2inspector.theme";
+const VERDICTS = ["CRITICAL", "WARNING", "HEALTHY", "PENDING", "STOPPED", "TERMINATED"];
+const VERDICT_RANK = Object.fromEntries(VERDICTS.map((v, i) => [v, i]));
+const VERDICT_VAR = { CRITICAL: "var(--crit)", WARNING: "var(--warn)", HEALTHY: "var(--ok)", PENDING: "var(--pend)", STOPPED: "var(--stop)", TERMINATED: "var(--term)" };
+const DEFAULT_FILTERS = { q: "", state: "", platform: "", ssm: "", tagKey: "", tagValue: "", verdict: "ALL" };
+const state = {
+  data: null, apiKey: "", timer: null, countdown: 60, animate: false,
+  sort: { key: "", dir: "" }, drawerId: null, viewIds: [], f: { ...DEFAULT_FILTERS },
+};
+
+// Build DOM with textContent only, so values from AWS (tags etc.) can never inject HTML.
+function el(tag, props, ...kids) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(props || {})) {
+    if (value === null || value === undefined || value === false) continue;
+    if (key === "class") node.className = value;
+    else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+    else node.setAttribute(key, value === true ? "" : value);
+  }
+  for (const kid of kids.flat()) {
+    if (kid === null || kid === undefined || kid === false) continue;
+    node.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  return node;
+}
+
+// Same idea for SVG (charts are drawn from numbers only).
+const SVG_NS = "http://www.w3.org/2000/svg";
+function svg(tag, props, ...kids) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [key, value] of Object.entries(props || {})) {
+    if (value !== null && value !== undefined) node.setAttribute(key, value);
+  }
+  for (const kid of kids.flat()) {
+    if (kid === null || kid === undefined) continue;
+    node.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  return node;
+}
+
+const dash = (v) => (v === null || v === undefined || v === "" ? "-" : v);
+function fmtUptime(hours) {
+  if (hours === null || hours === undefined) return "-";
+  const d = Math.floor(hours / 24), h = Math.floor(hours % 24);
+  return d > 0 ? `${d}d ${h}h` : `${h}h`;
+}
+function fmtTime(iso) { return iso ? new Date(iso).toLocaleString() : "-"; }
+const badge = (verdict) => el("span", { class: `badge b-${verdict}` }, verdict);
+const issueCount = (row) => row.health.reasons.filter((r) => r.severity !== "INFO").length;
+const reduceMotion = () => Boolean(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
+
+function ssmGroup(row) {
+  if (row.state !== "running") return "na";  // SSM only matters for running instances
+  const agent = row.ssm_agent || {};
+  if (agent.registered === null || agent.registered === undefined) return "unknown";
+  if (!agent.registered) return "notregistered";
+  return agent.ping_status === "Online" ? "online" : "notonline";
+}
+const SSM_LABEL = { online: "Online", notonline: "Not online", notregistered: "Not registered", unknown: "unknown", na: "n/a" };
+function ssmCell(row) {
+  const group = ssmGroup(row);
+  const text = group === "notonline" ? (row.ssm_agent.ping_status || "Not online") : SSM_LABEL[group];
+  return el("td", null, el("span", { class: `dot ${group}` }), text);
+}
+
+// ------------------------------- small helpers ------------------------------ //
+
+function toast(message, isError) {
+  const node = el("div", { class: `toast${isError ? " err" : ""}`, role: "status" }, message);
+  $("toasts").append(node);
+  setTimeout(() => node.classList.add("out"), 2300);
+  setTimeout(() => node.remove(), 2700);
+}
+
+// Try the modern clipboard API first, then the older copy command as a fallback.
+function legacyCopy(text) {
+  try {
+    const area = el("textarea", { style: "position:fixed;opacity:0", "aria-hidden": "true" });
+    area.value = text;
+    document.body.append(area);
+    area.select();
+    const done = Boolean(document.execCommand && document.execCommand("copy"));
+    area.remove();
+    return done;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function copyText(text, label) {
+  let ok = false;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    }
+  } catch (_) { /* blocked or unfocused: try the fallback below */ }
+  if (!ok) ok = legacyCopy(text);
+  toast(ok ? `${label} copied` : "Copy is not available in this browser", !ok);
+}
+
+function copyIcon() {
+  return svg("svg", { width: 14, height: 14, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 2, "stroke-linecap": "round", "aria-hidden": "true" },
+    svg("rect", { x: 9, y: 9, width: 11, height: 11, rx: 2 }), svg("path", { d: "M5 15V6a2 2 0 0 1 2-2h9" }));
+}
+
+function currentTheme() { return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark"; }
+function toggleTheme() {
+  const next = currentTheme() === "light" ? "dark" : "light";
+  document.documentElement.setAttribute("data-theme", next);
+  try { localStorage.setItem(THEME_KEY, next); } catch (_) { /* private mode: just do not remember */ }
+  $("theme").textContent = next === "light" ? "Dark" : "Light";
+  toast(`${next === "light" ? "Light" : "Dark"} theme`);
+}
+
+// -------------------------------- data loading ------------------------------ //
+
+async function api(path) {
+  const headers = state.apiKey ? { "X-API-Key": state.apiKey } : {};
+  const response = await fetch(path, { headers });
+  if (response.status === 401) { $("keybox").style.display = "flex"; throw new Error("API key required."); }
+  if (!response.ok) {
+    let detail = `Request failed (${response.status})`;
+    try { detail = (await response.json()).detail || detail; } catch (_) { /* keep default */ }
+    throw new Error(detail);
+  }
+  return response.json();
+}
+
+function showBanner(message, isNote) {
+  const banner = $("banner");
+  banner.textContent = message || "";
+  banner.className = isNote ? "note" : "";
+  banner.style.display = message ? "block" : "none";
+}
+
+async function loadRegions() {
+  try {
+    const info = await api("/api/regions");
+    const select = $("region");
+    select.replaceChildren(...info.regions.map((r) => el("option", { value: r, selected: r === info.default }, r)));
+    const wanted = new URLSearchParams(location.search).get("region");
+    if (wanted && info.regions.includes(wanted)) select.value = wanted;
+    $("demochip").classList.toggle("show", Boolean(info.demo));
+  } catch (error) {
+    showBanner(error.message);
+  }
+}
+
+function showSkeleton() {
+  $("rows").replaceChildren(...Array.from({ length: 6 }, () =>
+    el("tr", { class: "skeleton" }, ...Array.from({ length: 11 }, () => el("td")))));
+}
+
+async function load(options) {
+  const region = $("region").value;
+  if (!region) return;
+  if (state.timer) state.countdown = 60;
+  showBanner("");
+  $("meta").textContent = "Loading...";
+  if (!state.data) { renderHead(); showSkeleton(); }
+  try {
+    state.data = await api(`/api/instances?region=${encodeURIComponent(region)}`);
+    const unavailable = Object.entries(state.data.data_sources).filter(([, v]) => v !== "ok");
+    if (unavailable.length) {
+      showBanner(`Some data is unavailable: ${unavailable.map(([k, v]) => `${k} ${v}`).join("; ")}. Related health checks were skipped.`, true);
+    }
+    syncTagOptions();
+    state.animate = true;
+    render();
+    if (options && options.announce) toast(`Updated: ${state.data.totals.instances} instances in ${state.data.region}`);
+  } catch (error) {
+    state.data = null;
+    $("rows").replaceChildren();
+    $("cards").replaceChildren();
+    $("ring").replaceChildren();
+    $("overview").hidden = true;
+    $("chips").hidden = true;
+    $("meta").textContent = "";
+    showBanner(error.message);
+  }
+}
+
+// ------------------------------- filtering + sorting ------------------------- //
+
+function visibleRows() {
+  const f = state.f, q = f.q.trim().toLowerCase();
+  return state.data.instances.filter((row) => {
+    if (f.verdict !== "ALL" && row.health.verdict !== f.verdict) return false;
+    if (f.state && row.state !== f.state) return false;
+    if (f.platform && row.platform !== f.platform) return false;
+    if (f.ssm && ssmGroup(row) !== f.ssm) return false;
+    if (f.tagKey) {
+      const value = row.tags[f.tagKey];
+      if (f.tagValue === NOT_SET) { if (value) return false; }
+      else if (f.tagValue) { if (value !== f.tagValue) return false; }
+      else if (!value) return false;  // a key with value "Any" means: has this tag
+    }
+    if (!q) return true;
+    const haystack = [row.name, row.instance_id, row.private_ip, row.public_ip, row.instance_type,
+      row.availability_zone, ...Object.values(row.tags)].join(" ").toLowerCase();
+    return haystack.includes(q);
+  });
+}
+
+const COLUMNS = [
+  { key: "name", label: "Name", type: "text", get: (r) => r.name },
+  { key: "instance_id", label: "Instance ID", type: "text", get: (r) => r.instance_id },
+  { key: "state", label: "State", type: "text", get: (r) => r.state },
+  { key: "health", label: "Health", type: "num", get: (r) => VERDICT_RANK[r.health.verdict] },
+  { key: "instance_type", label: "Type", type: "text", get: (r) => r.instance_type },
+  { key: "availability_zone", label: "AZ", type: "text", get: (r) => r.availability_zone },
+  { key: "private_ip", label: "Private IP", type: "text", get: (r) => r.private_ip },
+  { key: "public_ip", label: "Public IP", type: "text", get: (r) => r.public_ip },
+  { key: "ssm", label: "SSM", type: "text", get: (r) => ssmGroup(r) },
+  { key: "uptime_hours", label: "Uptime", type: "num", get: (r) => r.uptime_hours },
+  { key: "issues", label: "Issues", type: "num", get: (r) => issueCount(r) },
+];
+
+function sortRows(rows) {
+  const { key, dir } = state.sort;
+  const col = COLUMNS.find((c) => c.key === key);
+  if (!col || !dir) return rows;  // no sort chosen: keep the server order (worst first)
+  const sign = dir === "desc" ? -1 : 1;
+  const empty = (v) => v === null || v === undefined || v === "";
+  return [...rows].sort((a, b) => {
+    const x = col.get(a), y = col.get(b);
+    if (empty(x) && empty(y)) return a.instance_id.localeCompare(b.instance_id);
+    if (empty(x)) return 1;  // empty values always go last
+    if (empty(y)) return -1;
+    const result = col.type === "num" ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: "base" });
+    return result !== 0 ? sign * result : a.instance_id.localeCompare(b.instance_id);
+  });
+}
+
+function cycleSort(key) {
+  const s = state.sort;
+  if (s.key !== key) state.sort = { key, dir: "asc" };
+  else if (s.dir === "asc") state.sort = { key, dir: "desc" };
+  else state.sort = { key: "", dir: "" };
+  render();
+}
+
+// Tag dropdowns are built from the tags that actually exist on the loaded instances.
+function syncTagOptions() {
+  const keys = new Set();
+  state.data.instances.forEach((row) => Object.keys(row.tags).forEach((k) => keys.add(k)));
+  if (state.f.tagKey && !keys.has(state.f.tagKey)) { state.f.tagKey = ""; state.f.tagValue = ""; }
+  $("f-tagkey").replaceChildren(
+    el("option", { value: "" }, "Any"),
+    ...[...keys].sort().map((k) => el("option", { value: k, selected: k === state.f.tagKey }, k)));
+  syncTagValues();
+}
+
+function syncTagValues() {
+  const select = $("f-tagval"), key = state.f.tagKey;
+  if (!key) {
+    state.f.tagValue = "";
+    select.replaceChildren(el("option", { value: "" }, "Any"));
+    select.disabled = true;
+    return;
+  }
+  const values = new Set();
+  state.data.instances.forEach((row) => { if (row.tags[key]) values.add(row.tags[key]); });
+  if (state.f.tagValue && state.f.tagValue !== NOT_SET && !values.has(state.f.tagValue)) state.f.tagValue = "";
+  select.disabled = false;
+  select.replaceChildren(
+    el("option", { value: "" }, "Any"),
+    el("option", { value: NOT_SET, selected: state.f.tagValue === NOT_SET }, "(not set)"),
+    ...[...values].sort().map((v) => el("option", { value: v, selected: v === state.f.tagValue }, v)));
+}
+
+function syncControls() {
+  $("search").value = state.f.q;
+  $("f-state").value = state.f.state;
+  $("f-platform").value = state.f.platform;
+  $("f-ssm").value = state.f.ssm;
+  if (state.data) syncTagOptions();
+}
+
+function clearFilters() {
+  state.f = { ...DEFAULT_FILTERS };
+  syncControls();
+  render();
+}
+
+// Filters and sort live in the page address so a view can be bookmarked.
+function writeUrl() {
+  const params = new URLSearchParams();
+  const region = $("region").value;
+  if (region) params.set("region", region);
+  for (const field of Object.keys(DEFAULT_FILTERS)) {
+    if (state.f[field] !== DEFAULT_FILTERS[field]) params.set(field, state.f[field]);
+  }
+  if (state.sort.key) params.set("sort", `${state.sort.key}:${state.sort.dir}`);
+  const query = params.toString();
+  history.replaceState(null, "", query ? `?${query}` : location.pathname);
+}
+
+function readUrl() {
+  const params = new URLSearchParams(location.search);
+  const choose = (key, allowed) => (allowed.includes(params.get(key)) ? params.get(key) : "");
+  state.f.q = (params.get("q") || "").slice(0, 200);
+  state.f.state = choose("state", ["running", "stopped", "pending", "stopping", "shutting-down", "terminated"]);
+  state.f.platform = choose("platform", ["Linux", "Windows"]);
+  state.f.ssm = choose("ssm", ["online", "notonline", "notregistered"]);
+  state.f.verdict = choose("verdict", VERDICTS) || "ALL";
+  state.f.tagKey = (params.get("tagKey") || "").slice(0, 128);
+  state.f.tagValue = (params.get("tagValue") || "").slice(0, 256);
+  const [sortKey, sortDir] = (params.get("sort") || "").split(":");
+  if (COLUMNS.some((c) => c.key === sortKey) && (sortDir === "asc" || sortDir === "desc")) state.sort = { key: sortKey, dir: sortDir };
+  syncControls();
+}
+
+// ------------------------------------ overview ------------------------------ //
+
+function renderRing() {
+  const { instances: total, by_verdict: by } = state.data.totals;
+  const R = 78, C = 2 * Math.PI * R;
+  const ring = $("ring");
+  const running = (by.HEALTHY || 0) + (by.WARNING || 0) + (by.CRITICAL || 0);
+  const pct = running ? `${Math.round(((by.HEALTHY || 0) / running) * 100)}% HEALTHY` : "NO RUNNING";
+
+  const big = svg("text", { x: 100, y: 104, "text-anchor": "middle", class: "ring-n" }, total);
+  const label = svg("text", { x: 100, y: 124, "text-anchor": "middle", class: "ring-l" }, "INSTANCES");
+  const sub = svg("text", { x: 100, y: 142, "text-anchor": "middle", class: "ring-p" }, pct);
+  const reset = () => { big.textContent = total; label.textContent = "INSTANCES"; sub.textContent = pct; sub.style.fill = ""; };
+
+  ring.classList.toggle("picked", state.f.verdict !== "ALL");
+  ring.replaceChildren(svg("circle", { cx: 100, cy: 100, r: R, class: "track" }));
+
+  let offset = 0;
+  const gap = Object.keys(by).length > 1 ? 3 : 0;
+  for (const verdict of VERDICTS) {
+    const count = by[verdict] || 0;
+    if (!count || !total) continue;
+    const length = (C * count) / total;
+    const pick = () => { state.f.verdict = state.f.verdict === verdict ? "ALL" : verdict; render(); };
+    const show = () => {
+      big.textContent = count; label.textContent = verdict;
+      sub.textContent = `${Math.round((count / total) * 100)}% OF FLEET`; sub.style.fill = VERDICT_VAR[verdict];
+    };
+    const slice = svg("circle", {
+      cx: 100, cy: 100, r: R, class: `seg${state.f.verdict === verdict ? " on" : ""}`, transform: "rotate(-90 100 100)",
+      "stroke-dasharray": `${Math.max(length - gap, 0.5)} ${C}`, "stroke-dashoffset": -offset, style: `stroke:${VERDICT_VAR[verdict]}`,
+      tabindex: 0, role: "button", "aria-label": `${verdict}: ${count}. Select to filter.`,
+    }, svg("title", null, `${verdict}: ${count} (click to filter)`));
+    slice.addEventListener("mouseenter", show);
+    slice.addEventListener("focus", show);
+    slice.addEventListener("mouseleave", reset);
+    slice.addEventListener("blur", reset);
+    slice.addEventListener("click", pick);
+    slice.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+    ring.append(slice);
+    offset += length;
+  }
+  ring.append(big, label, sub);
+}
+
+function countUp(node, target) {
+  if (!state.animate || reduceMotion() || target === 0) { node.textContent = target; return; }
+  const start = performance.now(), duration = 650;
+  node.textContent = 0;
+  const tick = (now) => {
+    const t = Math.min(1, (now - start) / duration);
+    node.textContent = Math.round(target * (1 - Math.pow(1 - t, 3)));
+    if (t < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+  setTimeout(() => { node.textContent = target; }, duration + 150);  // safety net: always end on the true value
+}
+
+function renderCards() {
+  const totals = state.data.totals, by = totals.by_verdict;
+  const defs = [
+    ["ALL", "All instances", totals.instances],
+    ["CRITICAL", "Critical", by.CRITICAL || 0],
+    ["WARNING", "Warning", by.WARNING || 0],
+    ["HEALTHY", "Healthy", by.HEALTHY || 0],
+    ["STOPPED", "Stopped", by.STOPPED || 0],
+  ];
+  $("cards").replaceChildren(...defs.map(([key, label, count]) => {
+    const number = el("span", { class: "n" }, count);
+    countUp(number, count);
+    return el("button", {
+      class: `card${state.f.verdict === key ? " active" : ""}`, type: "button", "data-v": key,
+      "aria-pressed": state.f.verdict === key ? "true" : "false",
+      onclick: () => { state.f.verdict = key; render(); },
+    }, number, el("span", { class: "l" }, label));
+  }));
+}
+
+function renderChips() {
+  const f = state.f, chips = [];
+  if (f.verdict !== "ALL") chips.push({ label: "Health", value: f.verdict, clear: () => { f.verdict = "ALL"; } });
+  if (f.state) chips.push({ label: "State", value: f.state, clear: () => { f.state = ""; } });
+  if (f.platform) chips.push({ label: "Platform", value: f.platform, clear: () => { f.platform = ""; } });
+  if (f.ssm) chips.push({ label: "SSM", value: { online: "Online", notonline: "Registered, not online", notregistered: "Not registered" }[f.ssm], clear: () => { f.ssm = ""; } });
+  if (f.tagKey) {
+    const value = f.tagValue === NOT_SET ? "(not set)" : (f.tagValue || "any value");
+    chips.push({ label: "Tag", value: `${f.tagKey} = ${value}`, clear: () => { f.tagKey = ""; f.tagValue = ""; } });
+  }
+  if (f.q.trim()) chips.push({ label: "Search", value: `"${f.q.trim()}"`, clear: () => { f.q = ""; } });
+
+  $("chips").replaceChildren(...chips.map((chip) =>
+    el("span", { class: "fchip" }, `${chip.label}: `, el("b", null, chip.value),
+      el("button", { type: "button", "aria-label": `Remove ${chip.label} filter`, onclick: () => { chip.clear(); syncControls(); render(); } }, "\u00d7"))));
+  $("chips").hidden = chips.length === 0;
+}
+
+// ---------------------------------- table ----------------------------------- //
+
+function renderHead() {
+  $("head").replaceChildren(...COLUMNS.map((col) => {
+    const active = state.sort.key === col.key && state.sort.dir;
+    const sorted = active ? (state.sort.dir === "asc" ? "ascending" : "descending") : "none";
+    return el("th", { "aria-sort": sorted },
+      el("button", { class: "th-btn", type: "button", title: `Sort by ${col.label}`, onclick: () => cycleSort(col.key) },
+        col.label, el("span", { class: "arrow" }, active ? (state.sort.dir === "asc" ? "\u25B2" : "\u25BC") : "")));
+  }));
+}
+
+function markSelected() {
+  document.querySelectorAll("#rows tr").forEach((tr) => {
+    tr.classList.toggle("selected", Boolean(state.drawerId) && tr.getAttribute("data-id") === state.drawerId);
+  });
+}
+
+function render() {
+  if (!state.data) return;
+  $("overview").hidden = false;
+  renderRing();
+  renderCards();
+  renderChips();
+  renderHead();
+
+  const rows = sortRows(visibleRows());
+  state.viewIds = rows.map((row) => row.instance_id);
+  $("rows").replaceChildren(...rows.map((row, index) => {
+    const issues = issueCount(row);
+    const open = () => openDetail(row.instance_id);
+    return el("tr", {
+      class: `v-${row.health.verdict}${state.animate ? " enter" : ""}`, "data-id": row.instance_id,
+      style: state.animate ? `--i:${Math.min(index, 24)}` : null,
+      tabindex: "0", onclick: open,
+      onkeydown: (e) => { if (e.target === e.currentTarget && e.key === "Enter") open(); },
+    },
+      el("td", null, dash(row.name)),
+      el("td", null, el("div", { class: "idcell mono" }, row.instance_id,
+        el("button", {
+          class: "copy", type: "button", title: "Copy instance ID", "aria-label": `Copy ${row.instance_id}`,
+          onclick: (e) => { e.stopPropagation(); copyText(row.instance_id, "Instance ID"); },
+        }, copyIcon()))),
+      el("td", null, el("span", { class: `dot ${row.state}` }), row.state),
+      el("td", null, badge(row.health.verdict)),
+      el("td", null, dash(row.instance_type)),
+      el("td", null, dash(row.availability_zone)),
+      el("td", { class: "mono" }, dash(row.private_ip)),
+      el("td", { class: "mono" }, dash(row.public_ip)),
+      ssmCell(row),
+      el("td", null, fmtUptime(row.uptime_hours)),
+      el("td", null, issues ? el("span", { class: "issues" }, issues) : "-"));
+  }));
+  state.animate = false;
+  markSelected();
+  $("empty").style.display = rows.length ? "none" : "block";
+  $("meta").textContent = `${rows.length} of ${state.data.totals.instances} shown | ${state.data.region} | updated ${fmtTime(state.data.generated_at)}`;
+  writeUrl();
+}
+
+function focusRow(delta) {
+  const rows = [...document.querySelectorAll("#rows tr")];
+  if (!rows.length) return;
+  const index = rows.indexOf(document.activeElement);
+  const next = index === -1 ? (delta > 0 ? 0 : rows.length - 1) : Math.max(0, Math.min(rows.length - 1, index + delta));
+  rows[next].focus();
+}
+
+// ------------------------------- detail drawer ------------------------------ //
+
+function kv(pairs) {
+  const dl = el("dl");
+  for (const [k, v] of pairs) dl.append(el("dt", null, k), el("dd", null, v));
+  return dl;
+}
+
+// A section whose heading collapses it when clicked.
+function section(title, ...body) {
+  const box = el("div", { class: "section" });
+  const toggle = () => {
+    box.classList.toggle("collapsed");
+    heading.setAttribute("aria-expanded", String(!box.classList.contains("collapsed")));
+  };
+  const heading = el("h3", {
+    tabindex: "0", role: "button", "aria-expanded": "true", title: "Click to collapse or expand",
+    onclick: toggle, onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } },
+  }, title);
+  box.append(heading, ...body);
+  return box;
+}
+
+function closeDrawer() {
+  state.drawerId = null;
+  $("drawer").classList.remove("open");
+  $("scrim").classList.remove("open");
+  $("drawer").setAttribute("aria-hidden", "true");
+  markSelected();
+}
+
+async function openDetail(instanceId) {
+  const drawer = $("drawer");
+  state.drawerId = instanceId;
+  markSelected();
+  drawer.replaceChildren(el("p", { class: "meta" }, "Loading details..."));
+  drawer.classList.add("open"); $("scrim").classList.add("open");
+  drawer.setAttribute("aria-hidden", "false");
+  try {
+    const region = $("region").value;
+    const d = await api(`/api/instances/${encodeURIComponent(instanceId)}?region=${encodeURIComponent(region)}`);
+    if (state.drawerId !== instanceId) return;  // you already moved on to another server
+    drawer.replaceChildren(...detailNodes(d));
+    drawer.scrollTop = 0;
+  } catch (error) {
+    if (state.drawerId !== instanceId) return;
+    drawer.replaceChildren(el("div", { class: "section", role: "alert" }, error.message),
+      el("button", { onclick: closeDrawer }, "Close"));
+  }
+}
+
+function stepDrawer(delta) {
+  const index = state.viewIds.indexOf(state.drawerId);
+  const target = state.viewIds[index + delta];
+  if (index === -1 || !target) return;
+  openDetail(target);
+  const row = [...document.querySelectorAll("#rows tr")].find((tr) => tr.getAttribute("data-id") === target);
+  if (row && row.scrollIntoView) row.scrollIntoView({ block: "nearest" });
+}
+
+// Circular CPU gauge, drawn from one number.
+function gauge(percent) {
+  const R = 44, C = 2 * Math.PI * R, value = Math.max(0, Math.min(100, percent));
+  return svg("svg", { width: 120, height: 120, viewBox: "0 0 120 120", role: "img", "aria-label": `Average CPU ${value}%` },
+    svg("defs", null, svg("linearGradient", { id: "gaugeGrad", x1: 0, y1: 0, x2: 1, y2: 1 },
+      svg("stop", { offset: 0, "stop-color": "#6ea1ff" }), svg("stop", { offset: 1, "stop-color": "#4fd1c5" }))),
+    svg("circle", { cx: 60, cy: 60, r: R, fill: "none", stroke: "var(--line)", "stroke-width": 10 }),
+    svg("circle", {
+      cx: 60, cy: 60, r: R, fill: "none", stroke: "url(#gaugeGrad)", "stroke-width": 10, "stroke-linecap": "round",
+      transform: "rotate(-90 60 60)", "stroke-dasharray": `${(C * value) / 100} ${C}`,
+    }),
+    svg("text", { x: 60, y: 63, "text-anchor": "middle", class: "gauge-n" }, `${value}%`),
+    svg("text", { x: 60, y: 80, "text-anchor": "middle", class: "gauge-l" }, "AVG CPU"));
+}
+
+function detailNodes(d) {
+  const sc = d.status_checks, ssm = d.ssm, net = d.network, perf = d.performance;
+  const nodes = [];
+  const position = state.viewIds.indexOf(d.instance_id);
+
+  nodes.push(el("div", { class: "dtools" },
+    el("button", { type: "button", onclick: () => stepDrawer(-1), disabled: position <= 0, "aria-label": "Previous server", title: "Previous server (\u2190)" }, "\u2039 Prev"),
+    el("span", { class: "meta" }, position >= 0 ? `${position + 1} of ${state.viewIds.length}` : "not in the current list"),
+    el("button", { type: "button", onclick: () => stepDrawer(1), disabled: position < 0 || position >= state.viewIds.length - 1, "aria-label": "Next server", title: "Next server (\u2192)" }, "Next \u203A"),
+    el("span", { class: "spacer" }),
+    el("button", { type: "button", onclick: () => copyText(JSON.stringify(d, null, 2), "Details (JSON)") }, "Copy JSON"),
+    el("button", { onclick: closeDrawer, "aria-label": "Close details" }, "Close")));
+
+  nodes.push(el("div", { class: "dhead" },
+    el("h2", null, d.name || d.instance_id),
+    el("div", { class: "idrow" }, el("span", { class: "meta" }, d.instance_id),
+      el("button", { class: "copy", type: "button", style: "opacity:1", title: "Copy instance ID", "aria-label": "Copy instance ID", onclick: () => copyText(d.instance_id, "Instance ID") }, copyIcon())),
+    badge(d.health.verdict)));
+
+  const unavailable = Object.entries(d.data_sources).filter(([, v]) => v !== "ok");
+  if (unavailable.length) {
+    nodes.push(el("div", { class: "section" }, `Unavailable data: ${unavailable.map(([k, v]) => `${k} ${v}`).join("; ")}`));
+  }
+
+  nodes.push(section("Health",
+    d.health.reasons.length
+      ? el("ul", { class: "reasons" }, d.health.reasons.map((r) => el("li", { class: `s-${r.severity}` }, `${r.severity}: ${r.message}`)))
+      : el("div", { class: "meta" }, "No issues found.")));
+
+  nodes.push(section("Status checks",
+    kv([["System status", dash(sc.system_status)], ["Instance status", dash(sc.instance_status)],
+        ["Scheduled events", sc.events.length ? sc.events.map((e) => `${e.code}: ${e.description}`).join("; ") : "None"]])));
+
+  nodes.push(section("SSM agent",
+    ssm.registered === null ? el("div", { class: "meta" }, "SSM data unavailable.")
+    : kv([["Registered", ssm.registered ? "Yes" : "No"], ["Ping status", dash(ssm.ping_status)],
+          ["Last ping", fmtTime(ssm.last_ping)], ["Agent version", dash(ssm.agent_version)], ["Platform", dash(ssm.platform)]])));
+
+  const cpu = perf.cpu_24h;
+  const perfBody = [];
+  if (!cpu) perfBody.push(el("div", { class: "meta" }, "CloudWatch data unavailable."));
+  else if (!cpu.datapoints) perfBody.push(el("div", { class: "meta" }, "No CPU data in the last 24 hours."));
+  else {
+    perfBody.push(el("div", { class: "perf" }, gauge(cpu.average),
+      kv([["CPU average (24h)", `${cpu.average}%`], ["CPU maximum (24h)", `${cpu.maximum}%`], ["Hourly samples", cpu.datapoints]])));
+    perfBody.push(el("div", { class: "bars", role: "img", "aria-label": "Hourly average CPU, last 24 hours" },
+      cpu.hourly.map((p) => el("div", { style: `height:${Math.max(2, Math.min(100, p.average))}%`, title: `${fmtTime(p.time)}: ${p.average}%` }))));
+  }
+  perf.notes.forEach((note) => perfBody.push(el("div", { class: "meta", style: "margin-top:8px" }, note)));
+  nodes.push(section("Performance (hourly CPU, last 24h)", ...perfBody));
+
+  nodes.push(section("Instance", kv([
+    ["State", d.state], ["Type", dash(d.instance_type)], ["Platform", d.platform], ["Architecture", dash(d.architecture)],
+    ["Availability zone", dash(d.availability_zone)], ["Launched", fmtTime(d.launch_time)], ["Uptime", fmtUptime(d.uptime_hours)],
+    ["AMI", `${dash(d.image.image_id)}${d.image.name ? ` (${d.image.name})` : ""}`], ["Key pair", dash(d.key_name)],
+    ["IAM profile", dash(d.iam_instance_profile)], ["EBS optimized", dash(String(d.ebs_optimized))],
+    ["Detailed monitoring", dash(d.monitoring)], ["IMDS tokens", dash(d.metadata_options.http_tokens)]])));
+
+  nodes.push(section("Network", kv([
+    ["Private IP", dash(d.private_ip)], ["Public IP", dash(d.public_ip)], ["VPC", dash(net.vpc_id)], ["Subnet", dash(net.subnet_id)],
+    ["Private DNS", dash(net.private_dns_name)], ["Public DNS", dash(net.public_dns_name)],
+    ["Network interfaces", net.network_interfaces], ["Security groups", net.security_groups.length
+      ? net.security_groups.map((g) => el("span", { class: "chip" }, `${g.name} (${g.id})`)) : "-"]])));
+
+  nodes.push(section("Storage",
+    d.storage.volumes.length ? el("div", null, d.storage.volumes.map((v) =>
+      el("div", { class: "vol" }, el("div", { class: "mono" }, `${v.device}  ${v.volume_id}`),
+        el("div", { class: "meta" }, `${dash(v.size_gb)} GB | ${dash(v.type)} | ${v.encrypted ? "encrypted" : (v.encrypted === false ? "NOT encrypted" : "encryption unknown")} | ${dash(v.attach_status)} | delete on termination: ${dash(String(v.delete_on_termination))}`))))
+    : el("div", { class: "meta" }, "No EBS volumes.")));
+
+  const tagEntries = Object.entries(d.tags);
+  nodes.push(section("Tags", tagEntries.length ? kv(tagEntries) : el("div", { class: "meta" }, "No tags.")));
+  return nodes;
+}
+
+// ------------------------------ help, auto-refresh --------------------------- //
+
+function toggleHelp(show) {
+  const open = show === undefined ? $("helpdlg").hidden : show;
+  $("helpdlg").hidden = !open;
+  if (open) $("helpclose").focus();
+}
+
+function updateCountdown() { $("countdown").textContent = state.timer ? `next refresh ${state.countdown}s` : ""; }
+function stopAuto() { clearInterval(state.timer); state.timer = null; updateCountdown(); }
+function startAuto() {
+  stopAuto();
+  state.countdown = 60;
+  state.timer = setInterval(() => {
+    state.countdown -= 1;
+    if (state.countdown <= 0) { state.countdown = 60; load(); }
+    updateCountdown();
+  }, 1000);
+  updateCountdown();
+}
+
+// ----------------------------------- wiring ---------------------------------- //
+
+$("refresh").addEventListener("click", () => load({ announce: true }));
+$("region").addEventListener("change", () => load());
+$("search").addEventListener("input", (e) => { state.f.q = e.target.value; render(); });
+$("f-state").addEventListener("change", (e) => { state.f.state = e.target.value; render(); });
+$("f-platform").addEventListener("change", (e) => { state.f.platform = e.target.value; render(); });
+$("f-ssm").addEventListener("change", (e) => { state.f.ssm = e.target.value; render(); });
+$("f-tagkey").addEventListener("change", (e) => { state.f.tagKey = e.target.value; state.f.tagValue = ""; syncTagValues(); render(); });
+$("f-tagval").addEventListener("change", (e) => { state.f.tagValue = e.target.value; render(); });
+$("clear").addEventListener("click", clearFilters);
+$("scrim").addEventListener("click", closeDrawer);
+$("theme").addEventListener("click", toggleTheme);
+$("help").addEventListener("click", () => toggleHelp());
+$("helpclose").addEventListener("click", () => toggleHelp(false));
+$("helpdlg").addEventListener("click", (e) => { if (e.target === e.currentTarget) toggleHelp(false); });
+$("savekey").addEventListener("click", async () => {
+  state.apiKey = $("apikey").value;
+  $("keybox").style.display = "none";
+  await loadRegions(); await load();
+});
+$("auto").addEventListener("change", (e) => (e.target.checked ? startAuto() : stopAuto()));
+$("download").addEventListener("click", () => {
+  if (!state.data) return;
+  const blob = new Blob([JSON.stringify(state.data, null, 2)], { type: "application/json" });
+  const link = el("a", { href: URL.createObjectURL(blob), download: `ec2-${state.data.region}-${new Date().toISOString().slice(0, 10)}.json` });
+  link.click(); URL.revokeObjectURL(link.href);
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName);
+  if (e.key === "Escape") {
+    if (!$("helpdlg").hidden) toggleHelp(false);
+    else if ($("drawer").classList.contains("open")) closeDrawer();
+    else if (typing) e.target.blur();
+    return;
+  }
+  if (typing) return;
+  const drawerOpen = $("drawer").classList.contains("open");
+  switch (e.key) {
+    case "/": e.preventDefault(); $("search").focus(); break;
+    case "r": load({ announce: true }); break;
+    case "c": clearFilters(); break;
+    case "t": toggleTheme(); break;
+    case "?": toggleHelp(); break;
+    case "j": focusRow(1); break;
+    case "k": focusRow(-1); break;
+    case "ArrowLeft": if (drawerOpen) stepDrawer(-1); break;
+    case "ArrowRight": if (drawerOpen) stepDrawer(1); break;
+    default: break;
+  }
+});
+
+$("theme").textContent = currentTheme() === "light" ? "Dark" : "Light";
+(async () => { readUrl(); renderHead(); await loadRegions(); await load(); })();
+</script>
+</body>
+</html>

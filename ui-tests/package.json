@@ -1,0 +1,7 @@
+{
+  "name": "ec2-inspector-ui-tests",
+  "private": true,
+  "description": "Optional browser-behaviour tests for the dashboard page (runs it in jsdom).",
+  "scripts": { "test": "node filters.js && node interactive.js" },
+  "devDependencies": { "jsdom": "^26.0.0" }
+}

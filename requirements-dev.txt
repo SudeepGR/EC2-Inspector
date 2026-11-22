@@ -1,0 +1,4 @@
+-r requirements.txt
+httpx
+pytest
+moto[ec2,ssm,cloudwatch]

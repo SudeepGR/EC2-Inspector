@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>EC2 Inspector diagrams</title>
+<style>
+  body { margin: 0; padding: 30px; background: #0b111d; font-family: Inter, "Segoe UI", system-ui, Arial, sans-serif; }
+  .diagram { margin: 0 0 40px; border-radius: 22px; overflow: hidden; width: 1400px; }
+  svg { display: block; }
+  .bg { fill: url(#bg); }
+  .title { font: 800 26px sans-serif; fill: #e8eef9; letter-spacing: .04em; }
+  .sub { font: 500 16px sans-serif; fill: #97a7c2; }
+  .h { font: 800 20px sans-serif; fill: #e8eef9; }
+  .t { font: 500 16px sans-serif; fill: #cdd9ee; }
+  .mono { font: 600 15px ui-monospace, Menlo, Consolas, monospace; fill: #a9c8ff; }
+  .small { font: 500 14px sans-serif; fill: #97a7c2; }
+  .step { font: 800 17px sans-serif; fill: #04101a; }
+  .lbl { font: 600 15px sans-serif; fill: #e8eef9; }
+  .node { fill: #172236; stroke-width: 2; }
+  .cyan { stroke: #6ea1ff; } .violet { stroke: #a89cf7; } .amber { stroke: #f4bd5a; } .pink { stroke: #4fd1c5; }
+  .ok { stroke: #4cd6a0; fill: rgba(76, 214, 160, .13); } .warn { stroke: #f4bd5a; fill: rgba(244, 189, 90, .13); }
+  .crit { stroke: #f58383; fill: rgba(245, 131, 131, .14); } .stop { stroke: #93a0b8; fill: rgba(147, 160, 184, .13); } .pend { stroke: #a89cf7; fill: rgba(168, 156, 247, .13); }
+  .dash { stroke-dasharray: 8 7; fill: rgba(244, 189, 90, .05); }
+  .arrow { stroke: #6ea1ff; stroke-width: 2.5; fill: none; marker-end: url(#ah); }
+  .arrow2 { stroke: #a89cf7; stroke-width: 2.5; fill: none; marker-end: url(#ah2); }
+  .back { stroke: #4fd1c5; stroke-width: 2.5; fill: none; marker-end: url(#ah3); }
+  .lane { stroke: rgba(140, 170, 230, .30); stroke-width: 2; stroke-dasharray: 3 8; }
+  .self { stroke: #4cd6a0; stroke-width: 2.5; fill: none; marker-end: url(#ah4); }
+</style>
+</head>
+<body>
+
+<!-- ============================ 1. ARCHITECTURE ============================ -->
+<div class="diagram" id="d-arch">
+<svg width="1400" height="700" viewBox="0 0 1400 700" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#14203a"/><stop offset="1" stop-color="#0e1522"/></linearGradient>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#6ea1ff"/></marker>
+    <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#a89cf7"/></marker>
+    <marker id="ah3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#4fd1c5"/></marker>
+    <marker id="ah4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#4cd6a0"/></marker>
+  </defs>
+  <rect class="bg" width="1400" height="700"/>
+  <text class="title" x="40" y="48">THE BIG PICTURE</text>
+  <text class="sub" x="40" y="74">Three parts: your browser, the app on your laptop, and AWS (or the built-in fake data)</text>
+
+  <!-- browser -->
+  <rect class="node cyan" x="40" y="250" width="270" height="190" rx="18"/>
+  <text class="h" x="64" y="290">1. YOUR BROWSER</text>
+  <text class="t" x="64" y="322">Shows the dashboard.</text>
+  <text class="t" x="64" y="346">You click, search, filter.</text>
+  <text class="mono" x="64" y="384">127.0.0.1:8000</text>
+  <text class="small" x="64" y="414">(the waiter you talk to)</text>
+
+  <!-- app -->
+  <rect class="node violet" x="430" y="110" width="450" height="430" rx="18"/>
+  <text class="h" x="454" y="150">2. THE APP ON YOUR LAPTOP</text>
+  <text class="sub" x="454" y="174">Python + FastAPI (the kitchen)</text>
+  <rect class="node cyan" x="454" y="196" width="402" height="84" rx="12"/>
+  <text class="h" x="472" y="228">Dashboard page</text>
+  <text class="small" x="472" y="254">app/static/index.html  (one file, no build)</text>
+  <rect class="node cyan" x="454" y="298" width="402" height="104" rx="12"/>
+  <text class="h" x="472" y="330">API (the order window)</text>
+  <text class="mono" x="472" y="356">/api/regions</text>
+  <text class="mono" x="472" y="378">/api/instances   /api/instances/{id}</text>
+  <rect class="node pink" x="454" y="420" width="402" height="100" rx="12"/>
+  <text class="h" x="472" y="452">Health rules (the inspector)</text>
+  <text class="small" x="472" y="476">app/inspector.py: turns facts into a</text>
+  <text class="small" x="472" y="498">verdict: HEALTHY, WARNING, CRITICAL...</text>
+
+  <!-- AWS -->
+  <rect class="node amber dash" x="1010" y="100" width="350" height="450" rx="18"/>
+  <text class="h" x="1034" y="140">3a. AWS (YOUR ACCOUNT)</text>
+  <text class="sub" x="1034" y="164">Read-only questions only</text>
+  <rect class="node amber" x="1034" y="186" width="302" height="104" rx="12"/>
+  <text class="h" x="1052" y="218">EC2</text>
+  <text class="small" x="1052" y="244">Which servers exist, their type,</text>
+  <text class="small" x="1052" y="264">IPs, tags, disks, status checks</text>
+  <rect class="node amber" x="1034" y="306" width="302" height="104" rx="12"/>
+  <text class="h" x="1052" y="338">SSM</text>
+  <text class="small" x="1052" y="364">Is the management agent alive</text>
+  <text class="small" x="1052" y="384">and reporting in?</text>
+  <rect class="node amber" x="1034" y="426" width="302" height="104" rx="12"/>
+  <text class="h" x="1052" y="458">CLOUDWATCH</text>
+  <text class="small" x="1052" y="484">CPU usage over the last 24 hours</text>
+  <text class="small" x="1052" y="504">(only when you open one server)</text>
+
+  <!-- demo -->
+  <rect class="node pend dash" x="430" y="580" width="450" height="84" rx="18" style="fill: rgba(168,156,247,.07)"/>
+  <text class="h" x="454" y="614">3b. OR: DEMO MODE  (DEMO_MODE=1)</text>
+  <text class="small" x="454" y="640">Built-in fake fleet. No AWS account, no internet needed.</text>
+
+  <!-- arrows -->
+  <path class="arrow" d="M312 320 L428 320"/>
+  <text class="lbl" x="318" y="304">asks</text>
+  <path class="back" d="M428 372 L312 372"/>
+  <text class="lbl" x="318" y="396">answers</text>
+  <text class="small" x="318" y="420">(page + JSON)</text>
+
+  <path class="arrow2" d="M882 236 L1008 236"/>
+  <path class="arrow2" d="M882 358 L1008 358"/>
+  <path class="arrow2" d="M882 480 L1008 480"/>
+  <text class="lbl" x="892" y="222">boto3</text>
+  <text class="small" x="888" y="260">uses your AWS</text>
+  <text class="small" x="888" y="278">credentials</text>
+  <path class="arrow2" d="M655 542 L655 578" style="stroke-dasharray: 6 6"/>
+  <text class="small" x="668" y="566">instead of AWS</text>
+</svg>
+</div>
+
+<!-- ============================ 2. REQUEST FLOW ============================ -->
+<div class="diagram" id="d-flow">
+<svg width="1400" height="940" viewBox="0 0 1400 940" xmlns="http://www.w3.org/2000/svg">
+  <rect class="bg" width="1400" height="940"/>
+  <text class="title" x="40" y="48">WHAT HAPPENS WHEN YOU OPEN THE PAGE AND CLICK A SERVER</text>
+  <text class="sub" x="40" y="74">Read it top to bottom. Numbers match the steps in the guide.</text>
+
+  <!-- lane headers -->
+  <rect class="node cyan" x="90" y="100" width="250" height="56" rx="14"/><text class="h" x="215" y="136" text-anchor="middle">BROWSER</text>
+  <rect class="node violet" x="575" y="100" width="250" height="56" rx="14"/><text class="h" x="700" y="136" text-anchor="middle">APP (FASTAPI)</text>
+  <rect class="node amber" x="1060" y="100" width="250" height="56" rx="14"/><text class="h" x="1185" y="136" text-anchor="middle">AWS</text>
+  <line class="lane" x1="215" y1="160" x2="215" y2="910"/><line class="lane" x1="700" y1="160" x2="700" y2="910"/><line class="lane" x1="1185" y1="160" x2="1185" y2="910"/>
+
+  <!-- step 1 -->
+  <path class="arrow" d="M218 200 L696 200"/><circle cx="240" cy="200" r="15" fill="#6ea1ff"/><text class="step" x="240" y="206" text-anchor="middle">1</text>
+  <text class="lbl" x="272" y="190">GET /   "give me the dashboard page"</text>
+  <path class="back" d="M696 232 L218 232"/><text class="small" x="272" y="254">the page arrives (HTML + CSS + JavaScript, one file)</text>
+  <!-- step 2 -->
+  <path class="arrow" d="M218 290 L696 290"/><circle cx="240" cy="290" r="15" fill="#6ea1ff"/><text class="step" x="240" y="296" text-anchor="middle">2</text>
+  <text class="lbl" x="272" y="280">GET /api/regions   "which regions can I pick?"</text>
+  <text class="small" x="272" y="316">(also tells the page if this is demo data)</text>
+  <!-- step 3 -->
+  <path class="arrow" d="M218 352 L696 352"/><circle cx="240" cy="352" r="15" fill="#6ea1ff"/><text class="step" x="240" y="358" text-anchor="middle">3</text>
+  <text class="lbl" x="272" y="342">GET /api/instances?region=us-east-1</text>
+  <!-- step 4 -->
+  <path class="arrow2" d="M704 412 L1181 412"/><circle cx="726" cy="412" r="15" fill="#a89cf7"/><text class="step" x="726" y="418" text-anchor="middle" style="fill:#fff">4</text>
+  <text class="lbl" x="758" y="402">asks EC2: list servers + status checks</text>
+  <text class="lbl" x="758" y="438">asks SSM: which agents are online?</text>
+  <path class="back" d="M1181 466 L704 466" style="stroke:#f4bd5a" /><text class="small" x="758" y="488">AWS answers with raw facts</text>
+  <!-- step 5 -->
+  <path class="self" d="M704 524 C 830 524, 830 574, 704 574"/><circle cx="726" cy="524" r="15" fill="#4cd6a0"/><text class="step" x="726" y="530" text-anchor="middle">5</text>
+  <text class="lbl" x="840" y="546">applies the health rules to every server</text>
+  <text class="small" x="840" y="568">(verdict + reasons per server)</text>
+  <!-- step 6 -->
+  <path class="back" d="M696 612 L218 612"/><circle cx="676" cy="612" r="15" fill="#4fd1c5"/><text class="step" x="676" y="618" text-anchor="middle" style="fill:#fff">6</text>
+  <text class="lbl" x="272" y="602">JSON: every server + totals</text>
+  <path class="self" d="M211 646 C 80 646, 80 696, 211 696"/>
+  <text class="small" x="272" y="664">the page draws: ring, cards, table</text>
+  <text class="small" x="272" y="686">filters and search happen right here in the browser</text>
+  <!-- step 7 -->
+  <path class="arrow" d="M218 746 L696 746"/><circle cx="240" cy="746" r="15" fill="#6ea1ff"/><text class="step" x="240" y="752" text-anchor="middle">7</text>
+  <text class="lbl" x="272" y="736">you click a row: GET /api/instances/i-0123...</text>
+  <!-- step 8 -->
+  <path class="arrow2" d="M704 794 L1181 794"/><circle cx="726" cy="794" r="15" fill="#a89cf7"/><text class="step" x="726" y="800" text-anchor="middle" style="fill:#fff">8</text>
+  <text class="lbl" x="758" y="784">asks EC2 (disks, image) + CloudWatch (CPU)</text>
+  <path class="back" d="M1181 828 L704 828" style="stroke:#f4bd5a"/>
+  <!-- step 9 -->
+  <path class="back" d="M696 874 L218 874"/><circle cx="676" cy="874" r="15" fill="#4fd1c5"/><text class="step" x="676" y="880" text-anchor="middle" style="fill:#fff">9</text>
+  <text class="lbl" x="272" y="864">full details: the slide-in panel opens</text>
+</svg>
+</div>
+
+<!-- ============================ 3. HEALTH DECISION ============================ -->
+<div class="diagram" id="d-health">
+<svg width="1400" height="790" viewBox="0 0 1400 790" xmlns="http://www.w3.org/2000/svg">
+  <rect class="bg" width="1400" height="790"/>
+  <text class="title" x="40" y="48">HOW THE APP DECIDES THE HEALTH BADGE</text>
+  <text class="sub" x="40" y="74">Asked in this order for every server. First answer that applies wins.</text>
+
+  <!-- start -->
+  <rect class="node cyan" x="40" y="300" width="170" height="80" rx="16"/>
+  <text class="h" x="125" y="336" text-anchor="middle">ONE SERVER</text>
+  <text class="small" x="125" y="360" text-anchor="middle">from EC2</text>
+  <path class="arrow" d="M212 340 L262 340"/>
+
+  <!-- state diamond -->
+  <polygon points="365,260 470,340 365,420 260,340" fill="#172236" stroke="#a89cf7" stroke-width="2"/>
+  <text class="h" x="365" y="336" text-anchor="middle">Is it</text>
+  <text class="h" x="365" y="360" text-anchor="middle">running?</text>
+
+  <!-- not running outcomes -->
+  <path class="arrow2" d="M365 258 L365 180 L560 180"/><text class="lbl" x="376" y="222">NO</text>
+  <rect class="node stop" x="562" y="128" width="250" height="104" rx="14"/>
+  <text class="h" x="580" y="160" fill="#cdd9ee">STOPPED / PENDING</text>
+  <text class="h" x="580" y="184">/ TERMINATED</text>
+  <text class="small" x="580" y="212">Not running, so no health checks.</text>
+
+  <!-- running -->
+  <path class="arrow" d="M472 340 L560 340"/><text class="lbl" x="494" y="326">YES</text>
+  <polygon points="690,260 810,340 690,420 570,340" fill="#172236" stroke="#a89cf7" stroke-width="2"/>
+  <text class="lbl" x="690" y="326" text-anchor="middle">AWS status check</text>
+  <text class="lbl" x="690" y="350" text-anchor="middle">IMPAIRED?</text>
+
+  <path class="arrow2" d="M690 422 L690 520 L860 520"/><text class="lbl" x="700" y="470">YES</text>
+  <rect class="node crit" x="862" y="468" width="240" height="104" rx="14"/>
+  <text class="h" x="882" y="504" style="fill:#f9a3a3">CRITICAL</text>
+  <text class="small" x="882" y="530">System or instance status</text>
+  <text class="small" x="882" y="550">check is failing.</text>
+
+  <path class="arrow" d="M812 340 L890 340"/><text class="lbl" x="826" y="326">NO</text>
+  <polygon points="1020,250 1150,340 1020,430 890,340" fill="#172236" stroke="#a89cf7" stroke-width="2"/>
+  <text class="lbl" x="1020" y="318" text-anchor="middle">Scheduled AWS event,</text>
+  <text class="lbl" x="1020" y="342" text-anchor="middle">or SSM agent not</text>
+  <text class="lbl" x="1020" y="366" text-anchor="middle">Online / registered?</text>
+
+  <path class="arrow2" d="M1020 252 L1020 190 L1180 190"/><text class="lbl" x="1030" y="226">YES</text>
+  <rect class="node warn" x="1182" y="138" width="190" height="104" rx="14"/>
+  <text class="h" x="1202" y="174" style="fill:#f7d58f">WARNING</text>
+  <text class="small" x="1202" y="200">Needs attention</text>
+  <text class="small" x="1202" y="220">soon.</text>
+
+  <path class="arrow" d="M1152 340 L1202 340"/>
+  <text class="lbl" x="1156" y="326">NO</text>
+  <rect class="node ok" x="1204" y="290" width="170" height="100" rx="14"/>
+  <text class="h" x="1224" y="334" style="fill:#8fe7c3">HEALTHY</text>
+  <text class="small" x="1224" y="360">All checks pass.</text>
+
+  <!-- advisories -->
+  <rect class="node cyan dash" x="40" y="600" width="900" height="160" rx="16" style="fill: rgba(110,161,255,.07)"/>
+  <text class="h" x="64" y="638">ALSO SHOWN, BUT NEVER CHANGE THE BADGE</text>
+  <text class="t" x="64" y="672">Missing required tags  (Name, Owner, Environment)</text>
+  <text class="t" x="64" y="698">Old metadata service allowed  (IMDSv1)</text>
+  <text class="t" x="64" y="724">High CPU (85% or more) or very low CPU (under 5%) over 24 hours</text>
+  <text class="small" x="64" y="748">They appear as notes in the detail panel, so you can act on them without a false alarm.</text>
+</svg>
+</div>
+
+</body>
+</html>
