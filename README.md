@@ -66,44 +66,6 @@ resizing.
 If a data source cannot be read (for example SSM permission is missing), the
 app says so and skips only the checks that need it. It never guesses.
 
-## Filtering
-
-**On the dashboard** (instant, no extra AWS calls): the search box (name, ID, IP,
-type, any tag value), State, Platform, SSM (Online / registered but not online /
-not registered), a Tag key and value picker built from the tags that exist
-(choose "(not set)" to find instances missing a tag), and the Critical / Warning /
-Healthy / Stopped cards. Filters combine with AND. "Clear filters" resets
-them. The filters are kept in the page address, so a filtered view can be
-bookmarked or shared, for example:
-
-```
-http://127.0.0.1:8000/?region=us-east-1&state=running&platform=Windows&tagKey=Environment&tagValue=prod
-```
-
-**On the API** (for scripts, or to ask AWS for only the servers you care about):
-
-```
-/api/instances?name=web                          # Name tag contains "web" (case-insensitive)
-/api/instances?state=running&state=stopped       # repeat for several values
-/api/instances?tag=Environment=prod&tag=Owner=x  # exact Key=Value, repeat for several
-/api/instances?verdict=WARNING&verdict=CRITICAL  # health verdict
-/api/instances?name=web&state=running&verdict=HEALTHY   # combined with AND
-```
-
-State and tag filters are applied by AWS itself; name and verdict are applied
-after the health data is gathered. Invalid values return 400 with a clear message.
-The response echoes the applied filters, and its totals describe the filtered set.
-
-## API
-
-| Endpoint | Purpose |
-|---|---|
-| `GET /` | Dashboard |
-| `GET /healthz` | Liveness probe (no AWS calls) |
-| `GET /api/regions` | Enabled regions |
-| `GET /api/instances?region=us-east-1` | Instances with verdicts and totals (filters above are optional) |
-| `GET /api/instances/{id}?region=us-east-1` | Full details for one instance |
-
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -119,25 +81,3 @@ The app is read-only, but it reveals your instance inventory (names, IPs, IAM
 profiles). Keep it on localhost or behind an internal load balancer, set
 `API_KEY` if others can reach it, and never expose it to the internet.
 
-## Tests
-
-```bash
-pip install -r requirements-dev.txt
-pytest -q
-```
-
-57 offline Python tests (AWS simulated with moto, SSM with a small fake, plus the demo
-fleet) cover the health rules, data collection, filters, graceful degradation, API
-errors, the API key and demo mode. They pass on Python 3.9 and 3.12.
-
-The dashboard page has 97 browser-behaviour checks in `ui-tests/` (filters, sorting,
-the clickable ring, chips, keyboard shortcuts, copy buttons, themes, the detail
-panel). They run the page in jsdom and need Node.js: `cd ui-tests && npm install && npm test`.
-
-## Not covered yet
-
-- Verified only against simulated AWS. Try it on a real account with a few test
-  instances before relying on it.
-- The Docker image has not been built or run.
-- Memory and disk usage need the CloudWatch agent; they are not shown.
-- One region per view; security group rules are not analysed.
